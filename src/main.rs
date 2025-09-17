@@ -271,7 +271,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     
-    let app = App::new(volume_manager.clone(), using_encryption)?;
+    let app = App::new(volume_manager, using_encryption)?;
     let res = run_app(&mut terminal, app);
     
     // Handle the result and show animation if needed
@@ -285,11 +285,8 @@ fn main() -> Result<()> {
                 crossterm::cursor::Show
             )?;
             
-            // Run encrypting animation
+            // Run encrypting animation (volume already unmounted in run_app)
             matrix::run_matrix_encrypting_animation()?;
-            
-            // Unmount the volume
-            let _ = volume_manager.unmount();
         }
         Err(err) => {
             disable_raw_mode()?;
@@ -332,8 +329,10 @@ fn run_app<B: ratatui::backend::Backend>(
             let needs_refresh = match app.mode {
                 AppMode::Normal => match key.code {
                     KeyCode::Char('q') => {
-                        // Return a special error to signal we need to show the animation
+                        // Unmount if using encryption
                         if app.using_encryption {
+                            // We'll handle the unmount here
+                            let _ = app.volume_manager.unmount();
                             return Err(anyhow::anyhow!("ENCRYPT_EXIT"));
                         }
                         return Ok(());
