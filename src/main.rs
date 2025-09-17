@@ -151,15 +151,25 @@ impl App {
             if selected > 0 && selected <= self.entries.len() {
                 let entry = &self.entries[selected - 1];
                 
-                // Suspend raw mode but don't clear screen
+                // Leave alternate screen and disable raw mode for the editor
                 disable_raw_mode()?;
+                execute!(
+                    io::stdout(),
+                    LeaveAlternateScreen,
+                    crossterm::cursor::Show
+                )?;
                 
                 let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
                 Command::new(editor)
                     .arg(&entry.path)
                     .status()?;
                 
-                // Re-enable raw mode
+                // Re-enter alternate screen and re-enable raw mode
+                execute!(
+                    io::stdout(),
+                    EnterAlternateScreen,
+                    crossterm::cursor::Hide
+                )?;
                 enable_raw_mode()?;
                 
                 self.load_entries()?;
@@ -289,17 +299,11 @@ fn main() -> Result<()> {
     // Handle the result and show animation if needed
     match res {
         Err(e) if e.to_string() == "ENCRYPT_EXIT" => {
-            // Clear and leave alternate screen properly
+            // Don't leave alternate screen here - reuse it for encrypting animation
             terminal.clear()?;
-            disable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                crossterm::cursor::Show
-            )?;
             
-            // Run encrypting animation (will handle its own screen management)
-            matrix::run_matrix_encrypting_animation()?;
+            // Run encrypting animation using the same screen
+            matrix::run_matrix_encrypting_animation_keep_screen()?;
         }
         Err(err) => {
             disable_raw_mode()?;

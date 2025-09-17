@@ -147,9 +147,9 @@ impl MatrixAnimation {
                 self.decode_complete_time = Some(Instant::now());
             }
             
-            // Wait 3 seconds after typing is complete before transitioning to journal
+            // Wait 1 second after typing is complete before transitioning to journal
             if let Some(complete_time) = self.decode_complete_time {
-                if complete_time.elapsed() > Duration::from_secs(3) {
+                if complete_time.elapsed() > Duration::from_secs(1) {
                     self.phase = AnimationPhase::Success;
                 }
             }
@@ -358,12 +358,12 @@ where
     }
 }
 
-pub fn run_matrix_encrypting_animation() -> Result<()> {
+pub fn run_matrix_encrypting_animation_keep_screen() -> Result<()> {
+    // Reuse the existing alternate screen - don't enter a new one
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
         stdout, 
-        EnterAlternateScreen,
         crossterm::cursor::Hide,
         crossterm::style::SetBackgroundColor(crossterm::style::Color::Rgb{r: 0, g: 0, b: 0}),
         crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
@@ -404,15 +404,13 @@ pub fn run_matrix_encrypting_animation() -> Result<()> {
         }
     }
     
+    // Leave alternate screen and restore terminal state
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         crossterm::cursor::Show, 
         LeaveAlternateScreen
     )?;
-    
-    // Print a newline to ensure clean terminal state
-    println!();
     
     Ok(())
 }
@@ -488,15 +486,13 @@ fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
             )
         }
         AnimationPhase::Decoding => {
-            // Show typed message with blinking cursor
+            // Show typed message with blinking cursor only while typing
             let typed_message = &animation.message[..animation.decoded_chars];
             let show_cursor = animation.start_time.elapsed().as_millis() / 500 % 2 == 0;
             let cursor = if animation.decoded_chars < animation.message.len() && show_cursor {
                 "█"
-            } else if animation.decoded_chars >= animation.message.len() && show_cursor {
-                "█"
             } else {
-                ""
+                ""  // No cursor after message is complete
             };
             
             (
@@ -504,10 +500,13 @@ fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
                 Style::default().fg(Color::LightGreen)
             )
         }
-        AnimationPhase::Success => (
-            "🚀 ENTERING THE MATRIX...".to_string(),
-            Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
-        ),
+        AnimationPhase::Success => {
+            // Keep showing the completed decrypting message
+            (
+                format!("> {}", animation.message),
+                Style::default().fg(Color::LightGreen)
+            )
+        },
         AnimationPhase::Failed => (
             "❌ ACCESS DENIED - AUTHENTICATION FAILED".to_string(),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
