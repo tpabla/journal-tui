@@ -91,8 +91,11 @@ impl VolumeManager {
         home.hash(&mut hasher);
         "JournalVault".hash(&mut hasher);
         
+        let hash_value = hasher.finish();
+        
         // Create a long, complex password that's consistent for this user
-        format!("JV_{}_{}_Secure", hasher.finish(), hasher.finish() * 7)
+        // Use wrapping operations to avoid overflow
+        format!("JV_{}_{}_Secure", hash_value, hash_value.wrapping_mul(7))
     }
     
     
