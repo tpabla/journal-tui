@@ -226,6 +226,8 @@ fn main() -> Result<()> {
         match volume_manager.create_encrypted_volume() {
             Ok(_) => {
                 println!(" ✓");
+                println!("\n📁 Your vault is at: ~/.journal/vault.dmg");
+                println!("   You can open it in Finder with Touch ID!");
                 
                 // Try to mount the newly created volume
                 print!("Mounting encrypted vault...");
