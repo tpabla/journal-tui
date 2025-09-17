@@ -207,7 +207,21 @@ fn main() -> Result<()> {
     execute!(stdout, EnterAlternateScreen)?;
     
     // Run authentication in the alternate screen
-    let authenticated = matrix::run_matrix_authentication_keep_screen(|| auth::authenticate(), is_first_time)?;
+    // For first time, also create the vault during the animation
+    let authenticated = if is_first_time {
+        let vm = volume_manager.clone();
+        matrix::run_matrix_authentication_keep_screen(move || {
+            // First authenticate
+            if !auth::authenticate()? {
+                return Ok(false);
+            }
+            // Then create the vault while animation continues
+            vm.create_encrypted_volume()?;
+            Ok(true)
+        }, is_first_time)?
+    } else {
+        matrix::run_matrix_authentication_keep_screen(|| auth::authenticate(), is_first_time)?
+    };
     
     if !authenticated {
         disable_raw_mode()?;
@@ -216,75 +230,50 @@ fn main() -> Result<()> {
         return Ok(());
     }
     
-    // Check if encrypted volume exists or should be created
-    if volume_manager.dmg_exists() {
-        // Try to mount existing volume silently
-        match volume_manager.mount_with_keychain() {
-            Ok(_) => {
-                // Successfully mounted, continue silently
+    // Now handle mounting and setup
+    // Try to mount the volume (whether existing or newly created)
+    match volume_manager.mount_with_keychain() {
+        Ok(_) => {
+            // Successfully mounted
+            // Create entries directory if it doesn't exist
+            let entries_path = volume_manager.get_entries_path();
+            if !entries_path.exists() {
+                fs::create_dir_all(&entries_path)?;
             }
-            Err(_) => {
-                // Leave screen to show error
-                disable_raw_mode()?;
-                execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+            
+            // Check for existing entries to migrate (only relevant for first time)
+            if is_first_time {
+                let home_dir = dirs::home_dir().expect("Could not find home directory");
+                let old_entries = home_dir.join(".journal").join("entries");
                 
-                // Password might not be in keychain, or keychain access denied
+                if old_entries.exists() {
+                    match volume_manager.migrate_entries(&old_entries) {
+                        Ok(_count) => {
+                            // Delete old unencrypted entries after successful migration
+                            let _ = fs::remove_dir_all(&old_entries);
+                        },
+                        Err(_) => {
+                            // Silently continue even if migration fails
+                        }
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            // Leave screen to show error
+            disable_raw_mode()?;
+            execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+            
+            if is_first_time {
+                println!("\n⚠️  Vault created but couldn't mount automatically.");
+                println!("You may need to approve keychain access on next run.");
+            } else {
                 println!("\n⚠️  Unable to unlock vault automatically.");
                 println!("\nPossible solutions:");
                 println!("1. Delete ~/.journal/vault.dmg to create a new vault");
                 println!("2. Ensure Touch ID or password is enabled for this app");
-                return Ok(());
             }
-        }
-    } else {
-        // Create encrypted volume silently (animation already showed the message)
-        match volume_manager.create_encrypted_volume() {
-            Ok(_) => {
-                // Try to mount the newly created volume
-                match volume_manager.mount_with_keychain() {
-                    Ok(_) => {
-                        // Create entries directory if it doesn't exist
-                        let entries_path = volume_manager.get_entries_path();
-                        if !entries_path.exists() {
-                            fs::create_dir_all(&entries_path)?;
-                        }
-                        
-                        // Check for existing entries to migrate
-                        let home_dir = dirs::home_dir().expect("Could not find home directory");
-                        let old_entries = home_dir.join(".journal").join("entries");
-                        
-                        if old_entries.exists() {
-                            match volume_manager.migrate_entries(&old_entries) {
-                                Ok(_count) => {
-                                    // Delete old unencrypted entries after successful migration
-                                    let _ = fs::remove_dir_all(&old_entries);
-                                },
-                                Err(_) => {
-                                    // Silently continue even if migration fails
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Leave screen to show error
-                        disable_raw_mode()?;
-                        execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
-                        
-                        println!("\n⚠️  Vault created but couldn't mount automatically.");
-                        println!("You may need to approve keychain access on next run.");
-                        return Ok(());
-                    }
-                }
-            }
-            Err(e) => {
-                // Leave screen to show error
-                disable_raw_mode()?;
-                execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
-                
-                println!("\n✗ Failed to create encrypted vault: {}", e);
-                println!("\nCannot continue without encryption. Please try again.");
-                return Ok(());
-            }
+            return Ok(());
         }
     }
     
