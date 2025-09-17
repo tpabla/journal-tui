@@ -261,6 +261,62 @@ where
     }
 }
 
+pub fn run_matrix_encrypting_animation() -> Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(
+        stdout, 
+        EnterAlternateScreen,
+        crossterm::cursor::Hide,
+        crossterm::style::SetBackgroundColor(crossterm::style::Color::Rgb{r: 0, g: 0, b: 0}),
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+    )?;
+    
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    
+    let (width, height) = terminal.size().map(|r| (r.width, r.height))?;
+    let mut animation = MatrixAnimation::new(width, height);
+    
+    // Set up for encrypting message
+    animation.phase = AnimationPhase::Decoding;
+    animation.message = "ENCRYPTING VAULT - SECURING MEMORIES".to_string();
+    animation.decoded_chars = 0;
+    
+    let start = Instant::now();
+    
+    // Show the typing animation for 2 seconds
+    while start.elapsed() < Duration::from_secs(2) {
+        animation.update();
+        
+        // Type out the message
+        if animation.decoded_chars < animation.message.len() {
+            animation.decoded_chars = (animation.decoded_chars + 1).min(animation.message.len());
+        }
+        
+        terminal.draw(|f| draw_matrix(f, &animation))?;
+        thread::sleep(Duration::from_millis(50));
+        
+        // Check for ESC key to skip
+        if event::poll(Duration::from_millis(1))? {
+            if let Event::Key(key) = event::read()? {
+                if key.code == KeyCode::Esc {
+                    break;
+                }
+            }
+        }
+    }
+    
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        crossterm::cursor::Show, 
+        LeaveAlternateScreen
+    )?;
+    
+    Ok(())
+}
+
 fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
     let area = f.area();
     

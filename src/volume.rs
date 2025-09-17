@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::fs;
 use std::io::Write;
 
+#[derive(Clone)]
 pub struct VolumeManager {
     dmg_path: PathBuf,
     volume_name: String,
@@ -36,7 +37,9 @@ impl VolumeManager {
         self.mount_point.join("entries")
     }
     
-    pub fn create_encrypted_volume(&self, password: &str) -> Result<()> {
+    pub fn create_encrypted_volume(&self) -> Result<()> {
+        // Generate a secure random password for the volume
+        let password = self.generate_secure_password();
         // Ensure parent directory exists
         if let Some(parent) = self.dmg_path.parent() {
             fs::create_dir_all(parent)?;
@@ -72,7 +75,7 @@ impl VolumeManager {
         }
         
         // Mount the volume to create entries directory
-        self.mount_with_password(password)?;
+        self.mount_with_password(&password)?;
         
         // Create entries directory
         let entries_path = self.get_entries_path();
@@ -81,7 +84,22 @@ impl VolumeManager {
         // Unmount after setup
         self.unmount()?;
         
+        // Save password to keychain for Touch ID access
+        self.save_password_to_keychain(&password)?;
+        
         Ok(())
+    }
+    
+    fn generate_secure_password(&self) -> String {
+        use rand::Rng;
+        use rand::distributions::Alphanumeric;
+        
+        // Generate a secure 32-character random password
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect()
     }
     
     pub fn mount_with_password(&self, password: &str) -> Result<()> {

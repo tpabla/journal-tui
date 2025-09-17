@@ -207,7 +207,7 @@ fn main() -> Result<()> {
     // Check if encrypted volume exists or should be created
     if volume_manager.dmg_exists() {
         // Try to mount existing volume
-        print!("\n🔐 Mounting encrypted journal volume...");
+        print!("\n🔐 Unlocking encrypted vault with Touch ID...");
         io::stdout().flush()?;
         
         match volume_manager.mount_with_keychain() {
@@ -215,80 +215,51 @@ fn main() -> Result<()> {
                 println!(" ✓");
                 using_encryption = true;
             }
-            Err(_) => {
-                // Try with password prompt
-                print!("\nEnter volume password: ");
-                io::stdout().flush()?;
-                
-                let password = rpassword::read_password()?;
-                
-                match volume_manager.mount_with_password(&password) {
-                    Ok(_) => {
-                        println!("✓ Volume mounted successfully");
-                        // Save to keychain for next time
-                        let _ = volume_manager.save_password_to_keychain(&password);
-                        using_encryption = true;
-                    }
-                    Err(e) => {
-                        println!("\n⚠️  Failed to mount encrypted volume: {}", e);
-                        println!("Using unencrypted storage as fallback.");
-                    }
-                }
+            Err(e) => {
+                println!("\n⚠️  Failed to mount encrypted volume: {}", e);
+                println!("Using unencrypted storage as fallback.");
             }
         }
     } else {
         // Offer to create encrypted volume
-        print!("\n🔒 No encrypted volume found. Create one? (y/n): ");
+        print!("\n🔒 Secure your journal with encryption? (y/n): ");
         io::stdout().flush()?;
         
         let mut response = String::new();
         io::stdin().read_line(&mut response)?;
         
         if response.trim().to_lowercase() == "y" {
-            print!("Enter password for encrypted volume: ");
+            print!("Creating encrypted vault (Touch ID protected)...");
             io::stdout().flush()?;
-            let password = rpassword::read_password()?;
             
-            print!("Confirm password: ");
-            io::stdout().flush()?;
-            let confirm = rpassword::read_password()?;
-            
-            if password == confirm {
-                print!("Creating encrypted volume...");
-                io::stdout().flush()?;
-                
-                match volume_manager.create_encrypted_volume(&password) {
-                    Ok(_) => {
-                        println!(" ✓");
-                        // Save to keychain
-                        let _ = volume_manager.save_password_to_keychain(&password);
+            match volume_manager.create_encrypted_volume() {
+                Ok(_) => {
+                    println!(" ✓");
+                    
+                    // Check for existing entries to migrate
+                    let home_dir = dirs::home_dir().expect("Could not find home directory");
+                    let old_entries = home_dir.join(".journal").join("entries");
+                    
+                    if old_entries.exists() {
+                        print!("Migrating existing entries...");
+                        io::stdout().flush()?;
                         
-                        // Check for existing entries to migrate
-                        let home_dir = dirs::home_dir().expect("Could not find home directory");
-                        let old_entries = home_dir.join(".journal").join("entries");
-                        
-                        if old_entries.exists() {
-                            print!("Migrating existing entries...");
-                            io::stdout().flush()?;
-                            
-                            volume_manager.mount_with_password(&password)?;
-                            match volume_manager.migrate_entries(&old_entries) {
-                                Ok(count) => println!(" ✓ Migrated {} entries", count),
-                                Err(e) => println!(" ⚠️  Migration failed: {}", e),
-                            }
-                        } else {
-                            volume_manager.mount_with_password(&password)?;
+                        // Mount with keychain (should work now that password is saved)
+                        volume_manager.mount_with_keychain()?;
+                        match volume_manager.migrate_entries(&old_entries) {
+                            Ok(count) => println!(" ✓ Migrated {} entries", count),
+                            Err(e) => println!(" ⚠️  Migration failed: {}", e),
                         }
-                        
-                        using_encryption = true;
+                    } else {
+                        volume_manager.mount_with_keychain()?;
                     }
-                    Err(e) => {
-                        println!(" ✗ Failed: {}", e);
-                        println!("Using unencrypted storage.");
-                    }
+                    
+                    using_encryption = true;
                 }
-            } else {
-                println!("Passwords don't match. Using unencrypted storage.");
+                Err(e) => {
+                    println!(" ✗ Failed: {}", e);
+                    println!("Using unencrypted storage.");
+                }
             }
         }
     }
@@ -300,18 +271,43 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     
-    let app = App::new(volume_manager, using_encryption)?;
+    let app = App::new(volume_manager.clone(), using_encryption)?;
     let res = run_app(&mut terminal, app);
     
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        crossterm::cursor::Show
-    )?;
-    
-    if let Err(err) = res {
-        eprintln!("Error: {err:?}");
+    // Handle the result and show animation if needed
+    match res {
+        Err(e) if e.to_string() == "ENCRYPT_EXIT" => {
+            // Clean up terminal
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                crossterm::cursor::Show
+            )?;
+            
+            // Run encrypting animation
+            matrix::run_matrix_encrypting_animation()?;
+            
+            // Unmount the volume
+            let _ = volume_manager.unmount();
+        }
+        Err(err) => {
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                crossterm::cursor::Show
+            )?;
+            eprintln!("Error: {err:?}");
+        }
+        Ok(_) => {
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                crossterm::cursor::Show
+            )?;
+        }
     }
     
     Ok(())
@@ -336,9 +332,9 @@ fn run_app<B: ratatui::backend::Backend>(
             let needs_refresh = match app.mode {
                 AppMode::Normal => match key.code {
                     KeyCode::Char('q') => {
-                        // Unmount encrypted volume on exit if using encryption
+                        // Return a special error to signal we need to show the animation
                         if app.using_encryption {
-                            let _ = app.volume_manager.unmount();
+                            return Err(anyhow::anyhow!("ENCRYPT_EXIT"));
                         }
                         return Ok(());
                     }
