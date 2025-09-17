@@ -75,18 +75,11 @@ impl VolumeManager {
             return Err(anyhow!("Failed to create encrypted volume: {}", error));
         }
         
-        // Save password to keychain FIRST for Touch ID access
+        // Save password to keychain for Touch ID access
         self.save_password_to_keychain(&password)?;
         
-        // Mount the volume to create entries directory
-        self.mount_with_password(&password)?;
-        
-        // Create entries directory
-        let entries_path = self.get_entries_path();
-        fs::create_dir_all(&entries_path)?;
-        
-        // Unmount after setup
-        self.unmount()?;
+        // We don't need to mount immediately - the entries directory 
+        // will be created on first actual mount
         
         Ok(())
     }

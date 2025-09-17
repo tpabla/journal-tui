@@ -227,26 +227,43 @@ fn main() -> Result<()> {
             Ok(_) => {
                 println!(" ✓");
                 
-                // Check for existing entries to migrate
-                let home_dir = dirs::home_dir().expect("Could not find home directory");
-                let old_entries = home_dir.join(".journal").join("entries");
+                // Try to mount the newly created volume
+                print!("Mounting encrypted vault...");
+                io::stdout().flush()?;
                 
-                if old_entries.exists() {
-                    print!("Migrating existing entries...");
-                    io::stdout().flush()?;
-                    
-                    // Mount with keychain (should work now that password is saved)
-                    volume_manager.mount_with_keychain()?;
-                    match volume_manager.migrate_entries(&old_entries) {
-                        Ok(count) => {
-                            println!(" ✓ Migrated {} entries", count);
-                            // Delete old unencrypted entries after successful migration
-                            let _ = fs::remove_dir_all(&old_entries);
-                        },
-                        Err(e) => println!(" ⚠️  Migration failed: {}", e),
+                match volume_manager.mount_with_keychain() {
+                    Ok(_) => {
+                        println!(" ✓");
+                        
+                        // Create entries directory if it doesn't exist
+                        let entries_path = volume_manager.get_entries_path();
+                        if !entries_path.exists() {
+                            fs::create_dir_all(&entries_path)?;
+                        }
+                        
+                        // Check for existing entries to migrate
+                        let home_dir = dirs::home_dir().expect("Could not find home directory");
+                        let old_entries = home_dir.join(".journal").join("entries");
+                        
+                        if old_entries.exists() {
+                            print!("Migrating existing entries...");
+                            io::stdout().flush()?;
+                            
+                            match volume_manager.migrate_entries(&old_entries) {
+                                Ok(count) => {
+                                    println!(" ✓ Migrated {} entries", count);
+                                    // Delete old unencrypted entries after successful migration
+                                    let _ = fs::remove_dir_all(&old_entries);
+                                },
+                                Err(e) => println!(" ⚠️  Migration failed: {}", e),
+                            }
+                        }
                     }
-                } else {
-                    volume_manager.mount_with_keychain()?;
+                    Err(_) => {
+                        println!("\n⚠️  Vault created but couldn't mount automatically.");
+                        println!("You may need to approve keychain access on next run.");
+                        return Ok(());
+                    }
                 }
             }
             Err(e) => {
