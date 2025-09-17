@@ -161,6 +161,20 @@ pub fn run_matrix_authentication<F>(auth_fn: F) -> Result<bool>
 where
     F: FnOnce() -> Result<bool> + Send + 'static,
 {
+    run_matrix_authentication_with_mode(auth_fn, false)
+}
+
+pub fn run_matrix_authentication_first_time<F>(auth_fn: F) -> Result<bool>
+where
+    F: FnOnce() -> Result<bool> + Send + 'static,
+{
+    run_matrix_authentication_with_mode(auth_fn, true)
+}
+
+fn run_matrix_authentication_with_mode<F>(auth_fn: F, first_time: bool) -> Result<bool>
+where
+    F: FnOnce() -> Result<bool> + Send + 'static,
+{
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -177,7 +191,56 @@ where
     let (width, height) = terminal.size().map(|r| (r.width, r.height))?;
     let mut animation = MatrixAnimation::new(width, height);
     
-    // Show authentication message immediately
+    // For first-time setup, skip directly to decoding
+    if first_time {
+        animation.phase = AnimationPhase::Decoding;
+        animation.message = "INITIALIZING ENCRYPTED VAULT".to_string();
+        animation.decoded_chars = 0;
+        
+        // Run authentication immediately for first-time
+        let auth_result = thread::spawn(move || {
+            auth_fn()
+        });
+        
+        // Show typing animation for first-time setup
+        while !auth_result.is_finished() || animation.decoded_chars < animation.message.len() {
+            animation.update();
+            
+            if animation.decoded_chars < animation.message.len() {
+                animation.decoded_chars = (animation.decoded_chars + 1).min(animation.message.len());
+            }
+            
+            terminal.draw(|f| draw_matrix(f, &animation))?;
+            thread::sleep(Duration::from_millis(50));
+        }
+        
+        // Get the result
+        match auth_result.join().unwrap() {
+            Ok(true) => {
+                // Wait a bit to show the complete message
+                thread::sleep(Duration::from_secs(1));
+                
+                disable_raw_mode()?;
+                execute!(
+                    terminal.backend_mut(), 
+                    crossterm::cursor::Show,
+                    LeaveAlternateScreen
+                )?;
+                return Ok(true);
+            }
+            _ => {
+                disable_raw_mode()?;
+                execute!(
+                    terminal.backend_mut(),
+                    crossterm::cursor::Show, 
+                    LeaveAlternateScreen
+                )?;
+                return Ok(false);
+            }
+        }
+    }
+    
+    // Normal flow for non-first-time
     animation.start_authentication();
     
     // Run authentication in background with 3 second delay
@@ -311,8 +374,7 @@ pub fn run_matrix_encrypting_animation() -> Result<()> {
     execute!(
         terminal.backend_mut(),
         crossterm::cursor::Show, 
-        LeaveAlternateScreen,
-        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        LeaveAlternateScreen
     )?;
     
     Ok(())

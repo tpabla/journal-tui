@@ -189,18 +189,16 @@ fn main() -> Result<()> {
     // Initialize volume manager to check if setup is needed
     let volume_manager = VolumeManager::new();
     
-    // Check if vault needs to be created BEFORE authentication
-    if !volume_manager.dmg_exists() {
-        println!("\n🔒 First time setup detected!");
-        println!("An encrypted vault will be created after authentication.");
-        println!("Press any key to continue...");
-        
-        // Wait for user acknowledgment
-        let _ = io::stdin().read_line(&mut String::new());
-    }
+    // Check if vault needs to be created and use appropriate authentication
+    let is_first_time = !volume_manager.dmg_exists();
     
-    // Run matrix authentication animation
-    let authenticated = matrix::run_matrix_authentication(|| auth::authenticate())?;
+    let authenticated = if is_first_time {
+        // First time: Show initialization message in matrix animation
+        matrix::run_matrix_authentication_first_time(|| auth::authenticate())?
+    } else {
+        // Normal run: Show biometric scan message
+        matrix::run_matrix_authentication(|| auth::authenticate())?
+    };
     
     if !authenticated {
         println!("Authentication required to access journal");
@@ -228,9 +226,7 @@ fn main() -> Result<()> {
         }
     } else {
         // Create encrypted volume (mandatory)
-        println!("\n🔒 Setting up encrypted vault for your journal...");
-        println!("Your entries will be protected with Touch ID.");
-        print!("\nCreating encrypted vault...");
+        print!("\n🔒 Creating encrypted vault...");
         io::stdout().flush()?;
         
         match volume_manager.create_encrypted_volume() {
