@@ -194,26 +194,15 @@ impl VolumeManager {
     }
     
     pub fn save_password_to_keychain(&self, password: &str) -> Result<()> {
-        // First delete any existing password
-        let _ = Command::new("security")
-            .args(&[
-                "delete-generic-password",
-                "-a", self.dmg_path.to_str().unwrap(),
-                "-D", "disk image password",
-            ])
-            .output();
-        
-        // Add password to keychain in the format that macOS disk image mounter expects
-        // This allows Finder to use Touch ID to unlock the vault
+        // Store password in keychain for app use only
         let output = Command::new("security")
             .args(&[
                 "add-generic-password",
-                "-a", self.dmg_path.to_str().unwrap(),  // Account is the DMG path
-                "-D", "disk image password",             // Description for disk images
-                "-s", self.dmg_path.to_str().unwrap(),   // Service is also DMG path
-                "-w", password,                          // The password
-                "-T", "",                                 // Allow all apps (including Finder)
-                "-U",                                     // Update if exists
+                "-a", "journal-tui",
+                "-s", "JournalVault",
+                "-w", password,
+                "-U",  // Update if exists
+                "-T", "",  // Allow all apps to access
             ])
             .output()?;
         
@@ -221,18 +210,6 @@ impl VolumeManager {
             let error = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow!("Failed to save password to keychain: {}", error));
         }
-        
-        // Also keep our app-specific entry for backwards compatibility
-        let _ = Command::new("security")
-            .args(&[
-                "add-generic-password",
-                "-a", "journal-tui",
-                "-s", "JournalVault",
-                "-w", password,
-                "-U",
-                "-T", "",
-            ])
-            .output();
         
         Ok(())
     }
