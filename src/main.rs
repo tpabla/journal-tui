@@ -195,6 +195,18 @@ impl App {
 }
 
 fn main() -> Result<()> {
+    // Set up panic hook to restore terminal on panic
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Restore terminal
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+        original_hook(panic_info);
+    }));
     // Initialize volume manager to check if setup is needed
     let volume_manager = VolumeManager::new();
     
@@ -286,32 +298,31 @@ fn main() -> Result<()> {
     let res = run_app(&mut terminal, app);
     
     // Handle the result and show animation if needed
-    match res {
+    let exit_result = match res {
         Err(e) if e.to_string() == "ENCRYPT_EXIT" => {
             // Don't leave alternate screen here - reuse it for encrypting animation
             terminal.clear()?;
             
             // Run encrypting animation using the same screen
             matrix::run_matrix_encrypting_animation_keep_screen()?;
+            Ok(())
         }
         Err(err) => {
-            disable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                crossterm::cursor::Show
-            )?;
             eprintln!("Error: {err:?}");
+            Err(err)
         }
-        Ok(_) => {
-            disable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                crossterm::cursor::Show
-            )?;
-        }
-    }
+        Ok(_) => Ok(())
+    };
+    
+    // Always restore terminal state before exiting
+    disable_raw_mode()?;
+    execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    )?;
+    
+    exit_result?;
     
     Ok(())
 }

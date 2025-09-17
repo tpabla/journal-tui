@@ -404,12 +404,11 @@ pub fn run_matrix_encrypting_animation_keep_screen() -> Result<()> {
         }
     }
     
-    // Leave alternate screen and restore terminal state
-    disable_raw_mode()?;
+    // Don't leave alternate screen here - let main handle it
+    // Just clean up cursor
     execute!(
         terminal.backend_mut(),
-        crossterm::cursor::Show, 
-        LeaveAlternateScreen
+        crossterm::cursor::Hide
     )?;
     
     Ok(())
