@@ -45,13 +45,14 @@ impl VolumeManager {
             fs::create_dir_all(parent)?;
         }
         
-        // Create encrypted DMG with hdiutil
+        // Create encrypted DMG with hdiutil using stdinpass to avoid interactive prompt
         let mut child = Command::new("hdiutil")
             .args(&[
                 "create",
                 "-size", "100m",
                 "-fs", "APFS",
                 "-encryption", "AES-256",
+                "-stdinpass",  // Read password from stdin without prompting
                 "-volname", &self.volume_name,
                 self.dmg_path.to_str().unwrap(),
             ])
@@ -60,11 +61,11 @@ impl VolumeManager {
             .stderr(Stdio::piped())
             .spawn()?;
         
-        // Provide password via stdin (hdiutil will prompt twice)
+        // Provide password via stdin
         if let Some(mut stdin) = child.stdin.take() {
-            // Password and verification
-            writeln!(stdin, "{}", password)?;
-            writeln!(stdin, "{}", password)?;
+            // Just write the password once with -stdinpass
+            write!(stdin, "{}", password)?;
+            stdin.flush()?;
         }
         
         let output = child.wait_with_output()?;
