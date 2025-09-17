@@ -128,7 +128,7 @@ impl MatrixAnimation {
     
     pub fn authentication_success(&mut self) {
         self.phase = AnimationPhase::Decoding;
-        self.message = "ACCESS GRANTED - DECRYPTING JOURNAL...".to_string();
+        self.message = "ACCESS GRANTED - DECRYPTING JOURNAL".to_string();
         self.decoded_chars = 0;
     }
     
@@ -143,16 +143,17 @@ impl MatrixAnimation {
         }
         
         if self.phase == AnimationPhase::Decoding {
-            self.decoded_chars = (self.decoded_chars + 1).min(self.message.len());
-            
-            // Mark when decoding is complete
-            if self.decoded_chars >= self.message.len() && self.decode_complete_time.is_none() {
+            // Type out the message character by character
+            if self.decoded_chars < self.message.len() {
+                self.decoded_chars = (self.decoded_chars + 1).min(self.message.len());
+            } else if self.decode_complete_time.is_none() {
+                // Mark when typing is complete
                 self.decode_complete_time = Some(Instant::now());
             }
             
-            // Wait 2 seconds after decoding is complete before transitioning
+            // Wait 3 seconds after typing is complete before transitioning to journal
             if let Some(complete_time) = self.decode_complete_time {
-                if complete_time.elapsed() > Duration::from_secs(2) {
+                if complete_time.elapsed() > Duration::from_secs(3) {
                     self.phase = AnimationPhase::Success;
                 }
             }
@@ -185,23 +186,22 @@ where
     let (width, height) = terminal.size().map(|r| (r.width, r.height))?;
     let mut animation = MatrixAnimation::new(width, height);
     
-    // Run matrix rain for 3 seconds before authentication
+    // Show authentication message immediately
+    animation.start_authentication();
+    
+    // Run authentication in background with 3 second delay
+    let auth_result = thread::spawn(move || {
+        thread::sleep(Duration::from_secs(3));
+        auth_fn()
+    });
+    
+    // Continue showing matrix rain with auth message for 3 seconds
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(3) {
         animation.update();
         terminal.draw(|f| draw_matrix(f, &animation))?;
         thread::sleep(Duration::from_millis(50));
     }
-    
-    // Now start authentication
-    animation.start_authentication();
-    
-    // Run authentication in background after Matrix is already running
-    let auth_result = thread::spawn(move || {
-        // Small delay to let the animation message appear
-        thread::sleep(Duration::from_millis(200));
-        auth_fn()
-    });
     
     loop {
         animation.update();
@@ -214,9 +214,8 @@ where
                 Ok(true) => {
                     animation.authentication_success();
                     
-                    // Run the success animation
-                    let success_start = Instant::now();
-                    while success_start.elapsed() < Duration::from_secs(2) {
+                    // Keep running until the animation completes (typing + 5 second wait)
+                    while animation.phase != AnimationPhase::Success {
                         animation.update();
                         terminal.draw(|f| draw_matrix(f, &animation))?;
                         thread::sleep(Duration::from_millis(50));
@@ -342,25 +341,20 @@ fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
             )
         }
         AnimationPhase::Decoding => {
-            let mut display_msg = String::new();
-            let chars: Vec<char> = animation.message.chars().collect();
-            let mut rng = rand::thread_rng();
-            
-            for (i, &c) in chars.iter().enumerate() {
-                if i < animation.decoded_chars {
-                    display_msg.push(c);
-                } else if c == ' ' {
-                    display_msg.push(' ');
-                } else {
-                    let glitch_chars = "!@#$%^&*(){}[]|\\アイウエオカキクケコ";
-                    let glitch_vec: Vec<char> = glitch_chars.chars().collect();
-                    display_msg.push(glitch_vec[rng.gen_range(0..glitch_vec.len())]);
-                }
-            }
+            // Show typed message with blinking cursor
+            let typed_message = &animation.message[..animation.decoded_chars];
+            let show_cursor = animation.start_time.elapsed().as_millis() / 500 % 2 == 0;
+            let cursor = if animation.decoded_chars < animation.message.len() && show_cursor {
+                "█"
+            } else if animation.decoded_chars >= animation.message.len() && show_cursor {
+                "█"
+            } else {
+                ""
+            };
             
             (
-                format!("✅ {}", display_msg),
-                Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)
+                format!("> {}{}", typed_message, cursor),
+                Style::default().fg(Color::LightGreen)
             )
         }
         AnimationPhase::Success => (
