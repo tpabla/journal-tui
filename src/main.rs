@@ -1,5 +1,6 @@
 mod auth;
 mod matrix;
+mod volume;
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
@@ -21,10 +22,12 @@ use ratatui::{
 use std::{
     fs,
     io,
+    io::Write as IoWrite,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
 };
+use volume::VolumeManager;
 
 #[derive(Debug)]
 struct JournalEntry {
@@ -45,12 +48,18 @@ struct App {
     mode: AppMode,
     title_input: String,
     journal_dir: PathBuf,
+    volume_manager: VolumeManager,
+    using_encryption: bool,
 }
 
 impl App {
-    fn new() -> Result<Self> {
-        let home_dir = dirs::home_dir().expect("Could not find home directory");
-        let journal_dir = home_dir.join(".journal").join("entries");
+    fn new(volume_manager: VolumeManager, using_encryption: bool) -> Result<Self> {
+        let journal_dir = if using_encryption {
+            volume_manager.get_entries_path()
+        } else {
+            let home_dir = dirs::home_dir().expect("Could not find home directory");
+            home_dir.join(".journal").join("entries")
+        };
         
         if !journal_dir.exists() {
             fs::create_dir_all(&journal_dir)?;
@@ -62,6 +71,8 @@ impl App {
             mode: AppMode::Normal,
             title_input: String::new(),
             journal_dir,
+            volume_manager,
+            using_encryption,
         };
         
         app.load_entries()?;
@@ -189,6 +200,99 @@ fn main() -> Result<()> {
         return Ok(());
     }
     
+    // Initialize volume manager
+    let volume_manager = VolumeManager::new();
+    let mut using_encryption = false;
+    
+    // Check if encrypted volume exists or should be created
+    if volume_manager.dmg_exists() {
+        // Try to mount existing volume
+        print!("\n🔐 Mounting encrypted journal volume...");
+        io::stdout().flush()?;
+        
+        match volume_manager.mount_with_keychain() {
+            Ok(_) => {
+                println!(" ✓");
+                using_encryption = true;
+            }
+            Err(_) => {
+                // Try with password prompt
+                print!("\nEnter volume password: ");
+                io::stdout().flush()?;
+                
+                let password = rpassword::read_password()?;
+                
+                match volume_manager.mount_with_password(&password) {
+                    Ok(_) => {
+                        println!("✓ Volume mounted successfully");
+                        // Save to keychain for next time
+                        let _ = volume_manager.save_password_to_keychain(&password);
+                        using_encryption = true;
+                    }
+                    Err(e) => {
+                        println!("\n⚠️  Failed to mount encrypted volume: {}", e);
+                        println!("Using unencrypted storage as fallback.");
+                    }
+                }
+            }
+        }
+    } else {
+        // Offer to create encrypted volume
+        print!("\n🔒 No encrypted volume found. Create one? (y/n): ");
+        io::stdout().flush()?;
+        
+        let mut response = String::new();
+        io::stdin().read_line(&mut response)?;
+        
+        if response.trim().to_lowercase() == "y" {
+            print!("Enter password for encrypted volume: ");
+            io::stdout().flush()?;
+            let password = rpassword::read_password()?;
+            
+            print!("Confirm password: ");
+            io::stdout().flush()?;
+            let confirm = rpassword::read_password()?;
+            
+            if password == confirm {
+                print!("Creating encrypted volume...");
+                io::stdout().flush()?;
+                
+                match volume_manager.create_encrypted_volume(&password) {
+                    Ok(_) => {
+                        println!(" ✓");
+                        // Save to keychain
+                        let _ = volume_manager.save_password_to_keychain(&password);
+                        
+                        // Check for existing entries to migrate
+                        let home_dir = dirs::home_dir().expect("Could not find home directory");
+                        let old_entries = home_dir.join(".journal").join("entries");
+                        
+                        if old_entries.exists() {
+                            print!("Migrating existing entries...");
+                            io::stdout().flush()?;
+                            
+                            volume_manager.mount_with_password(&password)?;
+                            match volume_manager.migrate_entries(&old_entries) {
+                                Ok(count) => println!(" ✓ Migrated {} entries", count),
+                                Err(e) => println!(" ⚠️  Migration failed: {}", e),
+                            }
+                        } else {
+                            volume_manager.mount_with_password(&password)?;
+                        }
+                        
+                        using_encryption = true;
+                    }
+                    Err(e) => {
+                        println!(" ✗ Failed: {}", e);
+                        println!("Using unencrypted storage.");
+                    }
+                }
+            } else {
+                println!("Passwords don't match. Using unencrypted storage.");
+            }
+        }
+    }
+    
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -196,7 +300,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     
-    let app = App::new()?;
+    let app = App::new(volume_manager, using_encryption)?;
     let res = run_app(&mut terminal, app);
     
     disable_raw_mode()?;
@@ -231,7 +335,13 @@ fn run_app<B: ratatui::backend::Backend>(
             
             let needs_refresh = match app.mode {
                 AppMode::Normal => match key.code {
-                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Char('q') => {
+                        // Unmount encrypted volume on exit if using encryption
+                        if app.using_encryption {
+                            let _ = app.volume_manager.unmount();
+                        }
+                        return Ok(());
+                    }
                     KeyCode::Char('j') | KeyCode::Down => {
                         app.move_selection_down();
                         false
@@ -435,16 +545,27 @@ fn ui(f: &mut Frame, app: &mut App) {
     let list_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // Header
+            Constraint::Length(6),  // Header (increased for encryption status)
             Constraint::Min(0),     // List
         ])
         .split(main_layout[0]);
     
-    // Render ASCII header
+    // Render ASCII header with encryption status
+    let encryption_status = if app.using_encryption {
+        vec![Span::styled("║  🔒 ", Style::default().fg(Color::LightGreen)),
+             Span::styled("ENCRYPTED VAULT ACTIVE", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+             Span::styled(" 🔒  ║", Style::default().fg(Color::LightGreen))]
+    } else {
+        vec![Span::styled("║  ⚠️  ", Style::default().fg(Color::Yellow)),
+             Span::styled("UNENCRYPTED MODE", Style::default().fg(Color::Yellow)),
+             Span::styled("  ⚠️   ║", Style::default().fg(Color::Yellow))]
+    };
+    
     let header = vec![
         Line::from(vec![Span::styled("╔═══════════════════════════════╗", Style::default().fg(Color::LightGreen))]),
         Line::from(vec![Span::styled("║  ░▒▓ NEURAL  JOURNAL ▓▒░     ║", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))]),
         Line::from(vec![Span::styled("║  ░▒▓ MEMORY  ARCHIVE ▓▒░     ║", Style::default().fg(Color::Cyan))]),
+        Line::from(encryption_status),
         Line::from(vec![Span::styled("╚═══════════════════════════════╝", Style::default().fg(Color::LightGreen))]),
     ];
     let header_widget = Paragraph::new(header)
