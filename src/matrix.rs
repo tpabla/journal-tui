@@ -211,36 +211,38 @@ where
         // Get the result
         match auth_result.join().unwrap() {
             Ok(true) => {
-                // Wait a bit to show the complete message
-                thread::sleep(Duration::from_secs(1));
+                // Brief pause to show the complete message
+                thread::sleep(Duration::from_millis(500));
                 
-                disable_raw_mode()?;
                 if leave_screen {
+                    disable_raw_mode()?;
                     execute!(
                         terminal.backend_mut(), 
                         crossterm::cursor::Show,
                         LeaveAlternateScreen
                     )?;
                 } else {
+                    // Keep raw mode enabled for seamless transition
                     execute!(
                         terminal.backend_mut(), 
-                        crossterm::cursor::Show
+                        crossterm::cursor::Hide
                     )?;
                 }
                 return Ok(true);
             }
             _ => {
-                disable_raw_mode()?;
                 if leave_screen {
+                    disable_raw_mode()?;
                     execute!(
                         terminal.backend_mut(),
                         crossterm::cursor::Show, 
                         LeaveAlternateScreen
                     )?;
                 } else {
+                    // Keep raw mode enabled
                     execute!(
                         terminal.backend_mut(),
-                        crossterm::cursor::Show
+                        crossterm::cursor::Hide
                     )?;
                 }
                 return Ok(false);
@@ -283,17 +285,18 @@ where
                         thread::sleep(Duration::from_millis(50));
                     }
                     
-                    disable_raw_mode()?;
                     if leave_screen {
+                        disable_raw_mode()?;
                         execute!(
                             terminal.backend_mut(), 
                             crossterm::cursor::Show,
                             LeaveAlternateScreen
                         )?;
                     } else {
+                        // Keep raw mode enabled
                         execute!(
                             terminal.backend_mut(), 
-                            crossterm::cursor::Show
+                            crossterm::cursor::Hide
                         )?;
                     }
                     return Ok(true);
@@ -309,17 +312,18 @@ where
                         thread::sleep(Duration::from_millis(50));
                     }
                     
-                    disable_raw_mode()?;
                     if leave_screen {
+                        disable_raw_mode()?;
                         execute!(
                             terminal.backend_mut(),
                             crossterm::cursor::Show, 
                             LeaveAlternateScreen
                         )?;
                     } else {
+                        // Keep raw mode enabled
                         execute!(
                             terminal.backend_mut(),
-                            crossterm::cursor::Show
+                            crossterm::cursor::Hide
                         )?;
                     }
                     return Ok(false);
@@ -331,17 +335,18 @@ where
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.code == KeyCode::Esc {
-                    disable_raw_mode()?;
                     if leave_screen {
+                        disable_raw_mode()?;
                         execute!(
                             terminal.backend_mut(),
                             crossterm::cursor::Show, 
                             LeaveAlternateScreen
                         )?;
                     } else {
+                        // Keep raw mode enabled
                         execute!(
                             terminal.backend_mut(),
-                            crossterm::cursor::Show
+                            crossterm::cursor::Hide
                         )?;
                     }
                     return Ok(false);
