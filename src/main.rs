@@ -14,7 +14,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+        Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap,
     },
     Frame, Terminal,
 };
@@ -513,8 +513,9 @@ fn ui(f: &mut Frame, app: &mut App) {
         let buf = f.buffer_mut();
         for y in popup_area.top()..popup_area.bottom() {
             for x in popup_area.left()..popup_area.right() {
-                buf.get_mut(x, y).set_symbol(" ");
-                buf.get_mut(x, y).set_style(Style::default().bg(Color::Rgb(0, 0, 0)));
+                let cell = &mut buf[(x, y)];
+                cell.set_symbol(" ");
+                cell.set_style(Style::default().bg(Color::Rgb(0, 0, 0)));
             }
         }
         

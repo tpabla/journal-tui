@@ -85,8 +85,6 @@ impl MatrixColumn {
 
 pub struct MatrixAnimation {
     columns: Vec<MatrixColumn>,
-    width: u16,
-    height: u16,
     phase: AnimationPhase,
     start_time: Instant,
     message: String,
@@ -111,8 +109,6 @@ impl MatrixAnimation {
         
         Self {
             columns,
-            width,
-            height,
             phase: AnimationPhase::MatrixRain,
             start_time: Instant::now(),
             message: String::new(),
@@ -158,11 +154,6 @@ impl MatrixAnimation {
                 }
             }
         }
-    }
-    
-    pub fn is_complete(&self) -> bool {
-        matches!(self.phase, AnimationPhase::Success) && 
-        self.start_time.elapsed() > Duration::from_secs(4)
     }
 }
 
@@ -277,7 +268,7 @@ fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
     let buf = f.buffer_mut();
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
-            let cell = buf.get_mut(x, y);
+            let cell = &mut buf[(x, y)];
             cell.set_symbol(" ");  // Set a space character
             cell.set_style(Style::new().bg(Color::Rgb(0, 0, 0)));
         }
@@ -371,7 +362,7 @@ fn draw_matrix(f: &mut Frame, animation: &MatrixAnimation) {
     let buf = f.buffer_mut();
     for y in message_area.top()..message_area.bottom() {
         for x in message_area.left()..message_area.right() {
-            let cell = buf.get_mut(x, y);
+            let cell = &mut buf[(x, y)];
             cell.set_symbol(" ");  // Set a space character
             cell.set_style(Style::new().bg(Color::Rgb(0, 0, 0)));
         }
