@@ -22,7 +22,6 @@ use ratatui::{
 use std::{
     fs,
     io,
-    io::Write as IoWrite,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -192,15 +191,17 @@ fn main() -> Result<()> {
     // Check if vault needs to be created and use appropriate authentication
     let is_first_time = !volume_manager.dmg_exists();
     
-    let authenticated = if is_first_time {
-        // First time: Show initialization message in matrix animation
-        matrix::run_matrix_authentication_first_time(|| auth::authenticate())?
-    } else {
-        // Normal run: Show biometric scan message
-        matrix::run_matrix_authentication(|| auth::authenticate())?
-    };
+    // Setup alternate screen first for seamless transition
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    
+    // Run authentication in the alternate screen
+    let authenticated = matrix::run_matrix_authentication_keep_screen(|| auth::authenticate(), is_first_time)?;
     
     if !authenticated {
+        disable_raw_mode()?;
+        execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
         println!("Authentication required to access journal");
         return Ok(());
     }
@@ -213,6 +214,10 @@ fn main() -> Result<()> {
                 // Successfully mounted, continue silently
             }
             Err(_) => {
+                // Leave screen to show error
+                disable_raw_mode()?;
+                execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+                
                 // Password might not be in keychain, or keychain access denied
                 println!("\n⚠️  Unable to unlock vault automatically.");
                 println!("\nPossible solutions:");
@@ -222,24 +227,12 @@ fn main() -> Result<()> {
             }
         }
     } else {
-        // Create encrypted volume (mandatory)
-        print!("\n🔒 Creating encrypted vault...");
-        io::stdout().flush()?;
-        
+        // Create encrypted volume silently (animation already showed the message)
         match volume_manager.create_encrypted_volume() {
             Ok(_) => {
-                println!(" ✓");
-                println!("\n📁 Vault created successfully!");
-                println!("   Access through this app with Touch ID only");
-                
                 // Try to mount the newly created volume
-                print!("Mounting encrypted vault...");
-                io::stdout().flush()?;
-                
                 match volume_manager.mount_with_keychain() {
                     Ok(_) => {
-                        println!(" ✓");
-                        
                         // Create entries directory if it doesn't exist
                         let entries_path = volume_manager.get_entries_path();
                         if !entries_path.exists() {
@@ -251,20 +244,22 @@ fn main() -> Result<()> {
                         let old_entries = home_dir.join(".journal").join("entries");
                         
                         if old_entries.exists() {
-                            print!("Migrating existing entries...");
-                            io::stdout().flush()?;
-                            
                             match volume_manager.migrate_entries(&old_entries) {
-                                Ok(count) => {
-                                    println!(" ✓ Migrated {} entries", count);
+                                Ok(_count) => {
                                     // Delete old unencrypted entries after successful migration
                                     let _ = fs::remove_dir_all(&old_entries);
                                 },
-                                Err(e) => println!(" ⚠️  Migration failed: {}", e),
+                                Err(_) => {
+                                    // Silently continue even if migration fails
+                                }
                             }
                         }
                     }
                     Err(_) => {
+                        // Leave screen to show error
+                        disable_raw_mode()?;
+                        execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+                        
                         println!("\n⚠️  Vault created but couldn't mount automatically.");
                         println!("You may need to approve keychain access on next run.");
                         return Ok(());
@@ -272,18 +267,20 @@ fn main() -> Result<()> {
                 }
             }
             Err(e) => {
-                println!(" ✗ Failed to create encrypted vault: {}", e);
+                // Leave screen to show error
+                disable_raw_mode()?;
+                execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+                
+                println!("\n✗ Failed to create encrypted vault: {}", e);
                 println!("\nCannot continue without encryption. Please try again.");
                 return Ok(());
             }
         }
     }
     
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    
-    let backend = CrosstermBackend::new(stdout);
+    // We're already in alternate screen and raw mode from the authentication
+    // Just create the backend and terminal
+    let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
     
     let app = App::new(volume_manager)?;
@@ -292,10 +289,8 @@ fn main() -> Result<()> {
     // Handle the result and show animation if needed
     match res {
         Err(e) if e.to_string() == "ENCRYPT_EXIT" => {
-            // Clear the current screen before animation
+            // Clear and leave alternate screen properly
             terminal.clear()?;
-            
-            // Run encrypting animation (will handle its own screen management)
             disable_raw_mode()?;
             execute!(
                 terminal.backend_mut(),
@@ -303,6 +298,7 @@ fn main() -> Result<()> {
                 crossterm::cursor::Show
             )?;
             
+            // Run encrypting animation (will handle its own screen management)
             matrix::run_matrix_encrypting_animation()?;
         }
         Err(err) => {

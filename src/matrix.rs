@@ -157,21 +157,15 @@ impl MatrixAnimation {
     }
 }
 
-pub fn run_matrix_authentication<F>(auth_fn: F) -> Result<bool>
+// Version that doesn't leave alternate screen (for seamless transition to journal)
+pub fn run_matrix_authentication_keep_screen<F>(auth_fn: F, first_time: bool) -> Result<bool>
 where
     F: FnOnce() -> Result<bool> + Send + 'static,
 {
-    run_matrix_authentication_with_mode(auth_fn, false)
+    run_matrix_authentication_with_mode(auth_fn, first_time, false)
 }
 
-pub fn run_matrix_authentication_first_time<F>(auth_fn: F) -> Result<bool>
-where
-    F: FnOnce() -> Result<bool> + Send + 'static,
-{
-    run_matrix_authentication_with_mode(auth_fn, true)
-}
-
-fn run_matrix_authentication_with_mode<F>(auth_fn: F, first_time: bool) -> Result<bool>
+fn run_matrix_authentication_with_mode<F>(auth_fn: F, first_time: bool, leave_screen: bool) -> Result<bool>
 where
     F: FnOnce() -> Result<bool> + Send + 'static,
 {
@@ -221,20 +215,34 @@ where
                 thread::sleep(Duration::from_secs(1));
                 
                 disable_raw_mode()?;
-                execute!(
-                    terminal.backend_mut(), 
-                    crossterm::cursor::Show,
-                    LeaveAlternateScreen
-                )?;
+                if leave_screen {
+                    execute!(
+                        terminal.backend_mut(), 
+                        crossterm::cursor::Show,
+                        LeaveAlternateScreen
+                    )?;
+                } else {
+                    execute!(
+                        terminal.backend_mut(), 
+                        crossterm::cursor::Show
+                    )?;
+                }
                 return Ok(true);
             }
             _ => {
                 disable_raw_mode()?;
-                execute!(
-                    terminal.backend_mut(),
-                    crossterm::cursor::Show, 
-                    LeaveAlternateScreen
-                )?;
+                if leave_screen {
+                    execute!(
+                        terminal.backend_mut(),
+                        crossterm::cursor::Show, 
+                        LeaveAlternateScreen
+                    )?;
+                } else {
+                    execute!(
+                        terminal.backend_mut(),
+                        crossterm::cursor::Show
+                    )?;
+                }
                 return Ok(false);
             }
         }
@@ -276,11 +284,18 @@ where
                     }
                     
                     disable_raw_mode()?;
-                    execute!(
-                        terminal.backend_mut(), 
-                        crossterm::cursor::Show,
-                        LeaveAlternateScreen
-                    )?;
+                    if leave_screen {
+                        execute!(
+                            terminal.backend_mut(), 
+                            crossterm::cursor::Show,
+                            LeaveAlternateScreen
+                        )?;
+                    } else {
+                        execute!(
+                            terminal.backend_mut(), 
+                            crossterm::cursor::Show
+                        )?;
+                    }
                     return Ok(true);
                 }
                 _ => {
@@ -295,11 +310,18 @@ where
                     }
                     
                     disable_raw_mode()?;
-                    execute!(
-                        terminal.backend_mut(),
-                        crossterm::cursor::Show, 
-                        LeaveAlternateScreen
-                    )?;
+                    if leave_screen {
+                        execute!(
+                            terminal.backend_mut(),
+                            crossterm::cursor::Show, 
+                            LeaveAlternateScreen
+                        )?;
+                    } else {
+                        execute!(
+                            terminal.backend_mut(),
+                            crossterm::cursor::Show
+                        )?;
+                    }
                     return Ok(false);
                 }
             }
@@ -310,11 +332,18 @@ where
             if let Event::Key(key) = event::read()? {
                 if key.code == KeyCode::Esc {
                     disable_raw_mode()?;
-                    execute!(
-                        terminal.backend_mut(),
-                        crossterm::cursor::Show, 
-                        LeaveAlternateScreen
-                    )?;
+                    if leave_screen {
+                        execute!(
+                            terminal.backend_mut(),
+                            crossterm::cursor::Show, 
+                            LeaveAlternateScreen
+                        )?;
+                    } else {
+                        execute!(
+                            terminal.backend_mut(),
+                            crossterm::cursor::Show
+                        )?;
+                    }
                     return Ok(false);
                 }
             }
