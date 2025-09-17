@@ -95,36 +95,6 @@ impl VolumeManager {
             .collect()
     }
     
-    pub fn mount_with_password(&self, password: &str) -> Result<()> {
-        if self.is_mounted() {
-            return Ok(());
-        }
-        
-        let mut child = Command::new("hdiutil")
-            .args(&[
-                "attach",
-                self.dmg_path.to_str().unwrap(),
-                "-stdinpass",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        
-        // Provide password via stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            writeln!(stdin, "{}", password)?;
-        }
-        
-        let output = child.wait_with_output()?;
-        
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Failed to mount volume: {}", error));
-        }
-        
-        Ok(())
-    }
     
     pub fn mount_with_keychain(&self) -> Result<()> {
         if self.is_mounted() {
