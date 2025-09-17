@@ -186,6 +186,19 @@ impl App {
 }
 
 fn main() -> Result<()> {
+    // Initialize volume manager to check if setup is needed
+    let volume_manager = VolumeManager::new();
+    
+    // Check if vault needs to be created BEFORE authentication
+    if !volume_manager.dmg_exists() {
+        println!("\n🔒 First time setup detected!");
+        println!("An encrypted vault will be created after authentication.");
+        println!("Press any key to continue...");
+        
+        // Wait for user acknowledgment
+        let _ = io::stdin().read_line(&mut String::new());
+    }
+    
     // Run matrix authentication animation
     let authenticated = matrix::run_matrix_authentication(|| auth::authenticate())?;
     
@@ -193,9 +206,6 @@ fn main() -> Result<()> {
         println!("Authentication required to access journal");
         return Ok(());
     }
-    
-    // Initialize volume manager
-    let volume_manager = VolumeManager::new();
     
     // Check if encrypted volume exists or should be created
     if volume_manager.dmg_exists() {

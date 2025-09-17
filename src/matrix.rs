@@ -311,7 +311,8 @@ pub fn run_matrix_encrypting_animation() -> Result<()> {
     execute!(
         terminal.backend_mut(),
         crossterm::cursor::Show, 
-        LeaveAlternateScreen
+        LeaveAlternateScreen,
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
     )?;
     
     Ok(())

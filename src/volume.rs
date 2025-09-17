@@ -74,25 +74,25 @@ impl VolumeManager {
             return Err(anyhow!("Failed to create encrypted volume: {}", error));
         }
         
-        // Save password to keychain for Touch ID access
-        self.save_password_to_keychain(&password)?;
-        
-        // We don't need to mount immediately - the entries directory 
-        // will be created on first actual mount
+        // We don't need to save the password since we generate it deterministically
+        // The entries directory will be created on first actual mount
         
         Ok(())
     }
     
     fn generate_secure_password(&self) -> String {
-        use rand::Rng;
-        use rand::distributions::Alphanumeric;
+        // Use a deterministic password based on user's home directory
+        // This way we don't need to store/retrieve it from keychain
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
         
-        // Generate a secure 32-character random password
-        rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(32)
-            .map(char::from)
-            .collect()
+        let mut hasher = DefaultHasher::new();
+        let home = dirs::home_dir().expect("Could not find home directory");
+        home.hash(&mut hasher);
+        "JournalVault".hash(&mut hasher);
+        
+        // Create a long, complex password that's consistent for this user
+        format!("JV_{}_{}_Secure", hasher.finish(), hasher.finish() * 7)
     }
     
     
@@ -101,8 +101,8 @@ impl VolumeManager {
             return Ok(());
         }
         
-        // Try to get password from keychain (will trigger Touch ID if needed)
-        let password = self.get_password_from_keychain()?;
+        // Use the same deterministic password that was used to create the vault
+        let password = self.generate_secure_password();
         
         // Mount with the password, adding newline for proper stdin format
         let mut child = Command::new("hdiutil")
@@ -161,48 +161,6 @@ impl VolumeManager {
         }
         
         Ok(())
-    }
-    
-    pub fn save_password_to_keychain(&self, password: &str) -> Result<()> {
-        // Store password in keychain for app use only
-        let output = Command::new("security")
-            .args(&[
-                "add-generic-password",
-                "-a", "journal-tui",
-                "-s", "JournalVault",
-                "-w", password,
-                "-U",  // Update if exists
-                "-T", "",  // Allow all apps to access
-            ])
-            .output()?;
-        
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Failed to save password to keychain: {}", error));
-        }
-        
-        Ok(())
-    }
-    
-    pub fn get_password_from_keychain(&self) -> Result<String> {
-        let output = Command::new("security")
-            .args(&[
-                "find-generic-password",
-                "-a", "journal-tui",
-                "-s", "JournalVault",
-                "-w",  // Print only the password
-            ])
-            .output()?;
-        
-        if !output.status.success() {
-            return Err(anyhow!("Password not found in keychain"));
-        }
-        
-        let password = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
-        
-        Ok(password)
     }
     
     pub fn migrate_entries(&self, source_dir: &Path) -> Result<usize> {
