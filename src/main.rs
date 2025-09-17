@@ -207,9 +207,12 @@ fn main() -> Result<()> {
             Ok(_) => {
                 println!(" ✓");
             }
-            Err(e) => {
-                println!("\n❌ Failed to unlock encrypted vault: {}", e);
-                println!("\nPlease ensure Touch ID/password is correct.");
+            Err(_) => {
+                // Password might not be in keychain, or keychain access denied
+                println!("\n⚠️  Unable to unlock vault automatically.");
+                println!("\nPossible solutions:");
+                println!("1. Delete ~/.journal/vault.dmg to create a new vault");
+                println!("2. Ensure Touch ID or password is enabled for this app");
                 return Ok(());
             }
         }
