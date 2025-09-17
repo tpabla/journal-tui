@@ -377,6 +377,9 @@ pub fn run_matrix_encrypting_animation() -> Result<()> {
         LeaveAlternateScreen
     )?;
     
+    // Print a newline to ensure clean terminal state
+    println!();
+    
     Ok(())
 }
 
