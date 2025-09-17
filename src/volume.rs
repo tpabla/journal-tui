@@ -61,11 +61,10 @@ impl VolumeManager {
             .stderr(Stdio::piped())
             .spawn()?;
         
-        // Provide password via stdin
+        // Provide password via stdin with newline
         if let Some(mut stdin) = child.stdin.take() {
-            // Just write the password once with -stdinpass
-            write!(stdin, "{}", password)?;
-            stdin.flush()?;
+            // Write the password with newline for -stdinpass
+            writeln!(stdin, "{}", password)?;
         }
         
         let output = child.wait_with_output()?;
@@ -132,9 +131,36 @@ impl VolumeManager {
             return Ok(());
         }
         
-        // Try to get password from keychain
+        // Try to get password from keychain (will trigger Touch ID if needed)
         let password = self.get_password_from_keychain()?;
-        self.mount_with_password(&password)
+        
+        // Mount with the password, adding newline for proper stdin format
+        let mut child = Command::new("hdiutil")
+            .args(&[
+                "attach",
+                self.dmg_path.to_str().unwrap(),
+                "-stdinpass",
+                "-nobrowse",  // Don't show in Finder
+                "-mountpoint", self.mount_point.to_str().unwrap(),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        
+        // Provide password via stdin with newline
+        if let Some(mut stdin) = child.stdin.take() {
+            writeln!(stdin, "{}", password)?;
+        }
+        
+        let output = child.wait_with_output()?;
+        
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Failed to mount volume: {}", error));
+        }
+        
+        Ok(())
     }
     
     pub fn unmount(&self) -> Result<()> {
