@@ -1,0 +1,16 @@
+[package]
+name = "journal-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+chrono = "0.4"
+dirs = "5.0"
+anyhow = "1.0"
+rand = "0.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+localauthentication-rs = "0.1"
+security-framework = "2.11"
