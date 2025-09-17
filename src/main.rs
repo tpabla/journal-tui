@@ -207,13 +207,10 @@ fn main() -> Result<()> {
     
     // Check if encrypted volume exists or should be created
     if volume_manager.dmg_exists() {
-        // Try to mount existing volume
-        print!("\n🔐 Unlocking encrypted vault with Touch ID...");
-        io::stdout().flush()?;
-        
+        // Try to mount existing volume silently
         match volume_manager.mount_with_keychain() {
             Ok(_) => {
-                println!(" ✓");
+                // Successfully mounted, continue silently
             }
             Err(_) => {
                 // Password might not be in keychain, or keychain access denied
