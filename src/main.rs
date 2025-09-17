@@ -49,17 +49,12 @@ struct App {
     title_input: String,
     journal_dir: PathBuf,
     volume_manager: VolumeManager,
-    using_encryption: bool,
 }
 
 impl App {
-    fn new(volume_manager: VolumeManager, using_encryption: bool) -> Result<Self> {
-        let journal_dir = if using_encryption {
-            volume_manager.get_entries_path()
-        } else {
-            let home_dir = dirs::home_dir().expect("Could not find home directory");
-            home_dir.join(".journal").join("entries")
-        };
+    fn new(volume_manager: VolumeManager) -> Result<Self> {
+        // Always use encrypted volume path
+        let journal_dir = volume_manager.get_entries_path();
         
         if !journal_dir.exists() {
             fs::create_dir_all(&journal_dir)?;
@@ -72,7 +67,6 @@ impl App {
             title_input: String::new(),
             journal_dir,
             volume_manager,
-            using_encryption,
         };
         
         app.load_entries()?;
@@ -202,7 +196,6 @@ fn main() -> Result<()> {
     
     // Initialize volume manager
     let volume_manager = VolumeManager::new();
-    let mut using_encryption = false;
     
     // Check if encrypted volume exists or should be created
     if volume_manager.dmg_exists() {
@@ -213,53 +206,50 @@ fn main() -> Result<()> {
         match volume_manager.mount_with_keychain() {
             Ok(_) => {
                 println!(" ✓");
-                using_encryption = true;
             }
             Err(e) => {
-                println!("\n⚠️  Failed to mount encrypted volume: {}", e);
-                println!("Using unencrypted storage as fallback.");
+                println!("\n❌ Failed to unlock encrypted vault: {}", e);
+                println!("\nPlease ensure Touch ID/password is correct.");
+                return Ok(());
             }
         }
     } else {
-        // Offer to create encrypted volume
-        print!("\n🔒 Secure your journal with encryption? (y/n): ");
+        // Create encrypted volume (mandatory)
+        println!("\n🔒 Setting up encrypted vault for your journal...");
+        println!("Your entries will be protected with Touch ID.");
+        print!("\nCreating encrypted vault...");
         io::stdout().flush()?;
         
-        let mut response = String::new();
-        io::stdin().read_line(&mut response)?;
-        
-        if response.trim().to_lowercase() == "y" {
-            print!("Creating encrypted vault (Touch ID protected)...");
-            io::stdout().flush()?;
-            
-            match volume_manager.create_encrypted_volume() {
-                Ok(_) => {
-                    println!(" ✓");
+        match volume_manager.create_encrypted_volume() {
+            Ok(_) => {
+                println!(" ✓");
+                
+                // Check for existing entries to migrate
+                let home_dir = dirs::home_dir().expect("Could not find home directory");
+                let old_entries = home_dir.join(".journal").join("entries");
+                
+                if old_entries.exists() {
+                    print!("Migrating existing entries...");
+                    io::stdout().flush()?;
                     
-                    // Check for existing entries to migrate
-                    let home_dir = dirs::home_dir().expect("Could not find home directory");
-                    let old_entries = home_dir.join(".journal").join("entries");
-                    
-                    if old_entries.exists() {
-                        print!("Migrating existing entries...");
-                        io::stdout().flush()?;
-                        
-                        // Mount with keychain (should work now that password is saved)
-                        volume_manager.mount_with_keychain()?;
-                        match volume_manager.migrate_entries(&old_entries) {
-                            Ok(count) => println!(" ✓ Migrated {} entries", count),
-                            Err(e) => println!(" ⚠️  Migration failed: {}", e),
-                        }
-                    } else {
-                        volume_manager.mount_with_keychain()?;
+                    // Mount with keychain (should work now that password is saved)
+                    volume_manager.mount_with_keychain()?;
+                    match volume_manager.migrate_entries(&old_entries) {
+                        Ok(count) => {
+                            println!(" ✓ Migrated {} entries", count);
+                            // Delete old unencrypted entries after successful migration
+                            let _ = fs::remove_dir_all(&old_entries);
+                        },
+                        Err(e) => println!(" ⚠️  Migration failed: {}", e),
                     }
-                    
-                    using_encryption = true;
+                } else {
+                    volume_manager.mount_with_keychain()?;
                 }
-                Err(e) => {
-                    println!(" ✗ Failed: {}", e);
-                    println!("Using unencrypted storage.");
-                }
+            }
+            Err(e) => {
+                println!(" ✗ Failed to create encrypted vault: {}", e);
+                println!("\nCannot continue without encryption. Please try again.");
+                return Ok(());
             }
         }
     }
@@ -271,7 +261,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     
-    let app = App::new(volume_manager, using_encryption)?;
+    let app = App::new(volume_manager)?;
     let res = run_app(&mut terminal, app);
     
     // Handle the result and show animation if needed
@@ -329,13 +319,9 @@ fn run_app<B: ratatui::backend::Backend>(
             let needs_refresh = match app.mode {
                 AppMode::Normal => match key.code {
                     KeyCode::Char('q') => {
-                        // Unmount if using encryption
-                        if app.using_encryption {
-                            // We'll handle the unmount here
-                            let _ = app.volume_manager.unmount();
-                            return Err(anyhow::anyhow!("ENCRYPT_EXIT"));
-                        }
-                        return Ok(());
+                        // Always unmount encrypted volume
+                        let _ = app.volume_manager.unmount();
+                        return Err(anyhow::anyhow!("ENCRYPT_EXIT"));
                     }
                     KeyCode::Char('j') | KeyCode::Down => {
                         app.move_selection_down();
@@ -540,27 +526,21 @@ fn ui(f: &mut Frame, app: &mut App) {
     let list_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),  // Header (increased for encryption status)
+            Constraint::Length(6),  // Header
             Constraint::Min(0),     // List
         ])
         .split(main_layout[0]);
     
-    // Render ASCII header with encryption status
-    let encryption_status = if app.using_encryption {
-        vec![Span::styled("║  🔒 ", Style::default().fg(Color::LightGreen)),
-             Span::styled("ENCRYPTED VAULT ACTIVE", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
-             Span::styled(" 🔒  ║", Style::default().fg(Color::LightGreen))]
-    } else {
-        vec![Span::styled("║  ⚠️  ", Style::default().fg(Color::Yellow)),
-             Span::styled("UNENCRYPTED MODE", Style::default().fg(Color::Yellow)),
-             Span::styled("  ⚠️   ║", Style::default().fg(Color::Yellow))]
-    };
-    
+    // Render ASCII header with permanent encryption indicator
     let header = vec![
         Line::from(vec![Span::styled("╔═══════════════════════════════╗", Style::default().fg(Color::LightGreen))]),
         Line::from(vec![Span::styled("║  ░▒▓ NEURAL  JOURNAL ▓▒░     ║", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))]),
         Line::from(vec![Span::styled("║  ░▒▓ MEMORY  ARCHIVE ▓▒░     ║", Style::default().fg(Color::Cyan))]),
-        Line::from(encryption_status),
+        Line::from(vec![
+            Span::styled("║  🔒 ", Style::default().fg(Color::LightGreen)),
+            Span::styled("ENCRYPTED VAULT", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+            Span::styled(" 🔒     ║", Style::default().fg(Color::LightGreen))
+        ]),
         Line::from(vec![Span::styled("╚═══════════════════════════════╝", Style::default().fg(Color::LightGreen))]),
     ];
     let header_widget = Paragraph::new(header)
