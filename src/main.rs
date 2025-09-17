@@ -292,7 +292,10 @@ fn main() -> Result<()> {
     // Handle the result and show animation if needed
     match res {
         Err(e) if e.to_string() == "ENCRYPT_EXIT" => {
-            // Clean up terminal
+            // Clear the current screen before animation
+            terminal.clear()?;
+            
+            // Run encrypting animation (will handle its own screen management)
             disable_raw_mode()?;
             execute!(
                 terminal.backend_mut(),
@@ -300,7 +303,6 @@ fn main() -> Result<()> {
                 crossterm::cursor::Show
             )?;
             
-            // Run encrypting animation (volume already unmounted in run_app)
             matrix::run_matrix_encrypting_animation()?;
         }
         Err(err) => {
