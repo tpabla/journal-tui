@@ -526,11 +526,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         
         let input_area = popup_area.inner(Margin::new(1, 1));
         
-        let cursor = if app.title_input.is_empty() {
-            "█"
-        } else {
-            ""
-        };
+        let cursor = "█";
         let input = Paragraph::new(format!("> {}{}", app.title_input, cursor))
             .style(Style::default().fg(Color::LightGreen).bg(Color::Rgb(0, 0, 0)))
             .wrap(Wrap { trim: false });
@@ -539,7 +535,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         f.render_widget(input, input_area);
         
         f.set_cursor_position((
-            input_area.x + app.title_input.len() as u16,
+            input_area.x + 2 + app.title_input.len() as u16,  // +2 for "> " prefix
             input_area.y,
         ));
     }
